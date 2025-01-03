@@ -1,0 +1,114 @@
+# Import necessary libraries
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+import psutil
+import os
+
+# Load and preprocess the MNIST dataset
+(x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+x_train, x_test = x_train / 255.0, x_test / 255.0  # Normalize pixel values to [0, 1]
+y_train = tf.keras.utils.to_categorical(y_train, 10)  # One-hot encode labels
+y_test = tf.keras.utils.to_categorical(y_test, 10)
+
+# Define the CNN model
+def create_model():
+    model = tf.keras.Sequential([
+        tf.keras.layers.InputLayer(input_shape=(28, 28)),
+        tf.keras.layers.Reshape((28, 28, 1)),
+        tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(128, activation='relu'),
+        tf.keras.layers.Dense(10, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+# Function to monitor memory usage
+def get_memory_usage():
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / (1024 * 1024)  # Memory usage in MB
+
+# Function to train the model and measure metrics
+def train_and_measure(device, data_fraction=1.0):
+    # Subset the data
+    train_size = int(len(x_train) * data_fraction)
+    x_subset, y_subset = x_train[:train_size], y_train[:train_size]
+
+    # Set device context
+    with tf.device(device):
+        model = create_model()
+        start_time = time.time()
+        initial_memory = get_memory_usage()
+        history = model.fit(x_subset, y_subset, epochs=3, batch_size=128, verbose=0)
+        final_memory = get_memory_usage()
+        end_time = time.time()
+
+    # Compute metrics
+    training_time = end_time - start_time
+    memory_usage = final_memory - initial_memory
+    throughput = train_size / training_time
+    accuracy = history.history['accuracy'][-1]
+
+    return training_time, memory_usage, throughput, accuracy
+
+# Perform experiments for CPU and GPU
+fractions = [0.1, 0.25, 0.5, 1.0]
+results_cpu = {"fraction": [], "time": [], "memory": [], "throughput": []}
+results_gpu = {"fraction": [], "time": [], "memory": [], "throughput": []}
+
+# Test with CPU
+print("Running on CPU...")
+for fraction in fractions:
+    time_taken, memory_used, throughput, _ = train_and_measure(device='/CPU:0', data_fraction=fraction)
+    results_cpu['fraction'].append(fraction)
+    results_cpu['time'].append(time_taken)
+    results_cpu['memory'].append(memory_used)
+    results_cpu['throughput'].append(throughput)
+
+# Test with GPU
+print("Running on GPU...")
+for fraction in fractions:
+    time_taken, memory_used, throughput, _ = train_and_measure(device='/GPU:0', data_fraction=fraction)
+    results_gpu['fraction'].append(fraction)
+    results_gpu['time'].append(time_taken)
+    results_gpu['memory'].append(memory_used)
+    results_gpu['throughput'].append(throughput)
+
+# Plot the results
+plt.figure(figsize=(18, 12))
+
+# Training time
+plt.subplot(3, 1, 1)
+plt.plot(results_cpu['fraction'], results_cpu['time'], marker='o', label='CPU')
+plt.plot(results_gpu['fraction'], results_gpu['time'], marker='o', label='GPU')
+plt.xlabel('Data Fraction')
+plt.ylabel('Training Time (s)')
+plt.title('Training Time: CPU vs GPU')
+plt.legend()
+plt.grid()
+
+# Memory usage
+plt.subplot(3, 1, 2)
+plt.plot(results_cpu['fraction'], results_cpu['memory'], marker='o', label='CPU')
+plt.plot(results_gpu['fraction'], results_gpu['memory'], marker='o', label='GPU')
+plt.xlabel('Data Fraction')
+plt.ylabel('Memory Usage (MB)')
+plt.title('Memory Usage: CPU vs GPU')
+plt.legend()
+plt.grid()
+
+# Throughput
+plt.subplot(3, 1, 3)
+plt.plot(results_cpu['fraction'], results_cpu['throughput'], marker='o', label='CPU')
+plt.plot(results_gpu['fraction'], results_gpu['throughput'], marker='o', label='GPU')
+plt.xlabel('Data Fraction')
+plt.ylabel('Throughput (samples/sec)')
+plt.title('Throughput: CPU vs GPU')
+plt.legend()
+plt.grid()
+
+plt.tight_layout()
+plt.show()
