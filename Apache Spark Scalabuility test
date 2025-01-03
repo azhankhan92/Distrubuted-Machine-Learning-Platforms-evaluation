@@ -1,0 +1,96 @@
+from pyspark.sql import SparkSession
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+import psutil
+import random
+import os
+
+# Initialize Spark session
+spark = SparkSession.builder \
+    .appName("PDC Assignment - Scalability Analysis") \
+    .config("spark.executor.memory", "2g") \
+    .config("spark.executor.cores", "2") \
+    .getOrCreate()
+
+# Generate synthetic dataset with varying sizes
+def generate_data(samples):
+    np.random.seed(42)
+    X = np.random.rand(samples, 4)
+    y = (X.sum(axis=1) > 2).astype(int)
+    return X, y
+
+# Convert data to Spark DataFrame
+def create_dataframe(X, y):
+    data = np.hstack((X, y.reshape(-1, 1)))
+    columns = ["feature1", "feature2", "feature3", "feature4", "label"]
+    return spark.createDataFrame(data.tolist(), columns)
+
+# Function to train the model and measure metrics
+def train_and_measure(df, epochs):
+    assembler = VectorAssembler(inputCols=["feature1", "feature2", "feature3", "feature4"], outputCol="features")
+    assembled_df = assembler.transform(df).select("features", "label")
+
+    lr = LogisticRegression(maxIter=epochs, featuresCol="features", labelCol="label")
+
+    start_time = time.time()
+    model = lr.fit(assembled_df)
+    training_time = time.time() - start_time
+
+    predictions = model.transform(assembled_df)
+    evaluator = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="accuracy")
+    accuracy = evaluator.evaluate(predictions)
+
+    resource_utilization = psutil.cpu_percent(interval=1)  # CPU utilization percentage
+
+    return training_time, accuracy, resource_utilization
+
+# Experiment with increasing dataset sizes
+sample_sizes = [100, 200, 400, 800, 1600]
+epochs = 5
+results = []
+
+for size in sample_sizes:
+    X, y = generate_data(size)
+    df = create_dataframe(X, y)
+    training_time, accuracy, resource_utilization = train_and_measure(df, epochs)
+    results.append((size, training_time, accuracy, resource_utilization))
+
+# Visualization
+sample_sizes, training_times, accuracies, utilizations = zip(*results)
+
+plt.figure(figsize=(12, 8))
+
+# Scalability analysis: relevant factors with increasing dataset size
+plt.subplot(2, 2, 1)
+plt.plot(sample_sizes, training_times, marker='o', label="Training Time")
+plt.title("Scalability: Training Time vs Dataset Size")
+plt.xlabel("Dataset Size")
+plt.ylabel("Time (s)")
+plt.grid(True)
+plt.legend()
+
+plt.subplot(2, 2, 2)
+plt.plot(sample_sizes, accuracies, marker='o', label="Accuracy", color='green')
+plt.title("Scalability: Accuracy vs Dataset Size")
+plt.xlabel("Dataset Size")
+plt.ylabel("Accuracy")
+plt.grid(True)
+plt.legend()
+
+plt.subplot(2, 2, 3)
+plt.plot(sample_sizes, utilizations, marker='o', label="CPU Utilization", color='orange')
+plt.title("Scalability: CPU Utilization vs Dataset Size")
+plt.xlabel("Dataset Size")
+plt.ylabel("% Utilization")
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# Stop the Spark session
+spark.stop()
