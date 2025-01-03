@@ -1,0 +1,135 @@
+from pyspark.sql import SparkSession
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+import psutil
+import random
+import os
+
+# Initialize Spark session
+spark = SparkSession.builder \
+    .appName("PDC Assignment - GPU-Based Training") \
+    .config("spark.executor.memory", "2g") \
+    .config("spark.executor.cores", "2") \
+    .getOrCreate()
+
+# Generate synthetic dataset (reduced size)
+def generate_data(samples):
+    np.random.seed(42)
+    X = np.random.rand(samples, 4)
+    y = (X.sum(axis=1) > 2).astype(int)
+    return X, y
+
+# Convert data to Spark DataFrame
+def create_dataframe(X, y):
+    data = np.hstack((X, y.reshape(-1, 1)))
+    columns = ["feature1", "feature2", "feature3", "feature4", "label"]
+    return spark.createDataFrame(data.tolist(), columns)
+
+# Simulate network latency and throughput
+def simulate_network_metrics():
+    latency = random.uniform(0.1, 1.0)  # Random latency in seconds
+    throughput = random.uniform(100, 1000)  # Random throughput in Mbps
+    return latency, throughput
+
+# Simulate fault tolerance and recovery
+def simulate_failure_and_recovery():
+    failure_time = random.uniform(0.5, 2.0)  # Time before failure in seconds
+    recovery_time = random.uniform(1.0, 3.0)  # Time to recover in seconds
+    return failure_time, recovery_time
+
+# Function to train the model and measure metrics
+def train_and_measure(df, epochs):
+    assembler = VectorAssembler(inputCols=["feature1", "feature2", "feature3", "feature4"], outputCol="features")
+    assembled_df = assembler.transform(df).select("features", "label")
+
+    lr = LogisticRegression(maxIter=epochs, featuresCol="features", labelCol="label")
+
+    epoch_times = []
+    start_time = time.time()
+    for epoch in range(1, epochs + 1):
+        epoch_start = time.time()
+        try:
+            model = lr.fit(assembled_df)
+        except Exception as e:
+            print(f"Error encountered: {e}. Simulating recovery...")
+            failure_time, recovery_time = simulate_failure_and_recovery()
+            print(f"Recovery initiated. Failure time: {failure_time}s, Recovery time: {recovery_time}s")
+            time.sleep(recovery_time)
+            continue
+        epoch_end = time.time()
+        epoch_times.append(epoch_end - epoch_start)
+    training_time = time.time() - start_time
+
+    predictions = model.transform(assembled_df)
+    evaluator = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="accuracy")
+    accuracy = evaluator.evaluate(predictions)
+
+    resource_utilization = psutil.cpu_percent(interval=1)  # CPU utilization percentage
+    latency, throughput = simulate_network_metrics()
+
+    failure_time, recovery_time = simulate_failure_and_recovery()
+
+    return epoch_times, training_time, accuracy, resource_utilization, latency, throughput, failure_time, recovery_time
+
+# Main experiment loop
+sample_size = 1000  # Fixed size for consistency
+epochs = 10
+X, y = generate_data(sample_size)
+df = create_dataframe(X, y)
+
+# Measure metrics
+epoch_times, training_time, accuracy, resource_utilization, latency, throughput, failure_time, recovery_time = train_and_measure(df, epochs)
+
+# Visualization
+plt.figure(figsize=(12, 10))
+
+# Plot epoch training times
+plt.subplot(3, 2, 1)
+plt.plot(range(1, epochs + 1), epoch_times, marker='o', label="Epoch Training Time")
+plt.title("Epoch Training Time")
+plt.xlabel("Epoch")
+plt.ylabel("Time (s)")
+plt.grid(True)
+plt.legend()
+
+# Plot resource utilization
+plt.subplot(3, 2, 2)
+plt.bar(["CPU Utilization"], [resource_utilization], color='orange', label="Resource Utilization")
+plt.title("Resource Utilization")
+plt.ylabel("% Utilization")
+plt.grid(axis='y')
+plt.legend()
+
+# Plot network metrics
+plt.subplot(3, 2, 3)
+plt.bar(["Latency", "Throughput"], [latency, throughput], color=['blue', 'green'], label="Network Metrics")
+plt.title("Network Latency and Throughput")
+plt.ylabel("Value")
+plt.grid(axis='y')
+plt.legend()
+
+# Plot accuracy
+plt.subplot(3, 2, 4)
+plt.bar(["Accuracy"], [accuracy], color='red', label="Model Accuracy")
+plt.title("Model Accuracy")
+plt.ylabel("Accuracy")
+plt.grid(axis='y')
+plt.legend()
+
+# Plot failure and recovery times
+plt.subplot(3, 2, 5)
+plt.bar(["Failure Time", "Recovery Time"], [failure_time, recovery_time], color=['purple', 'cyan'], label="Failure and Recovery")
+plt.title("Failure and Recovery Times")
+plt.ylabel("Time (s)")
+plt.grid(axis='y')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# Stop the Spark session
+spark.stop()
